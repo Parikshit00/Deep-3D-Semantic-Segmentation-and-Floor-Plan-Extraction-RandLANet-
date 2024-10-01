@@ -1,3 +1,5 @@
+.DS_Store
+scripts/.DS_Store
 scripts/__pycache__
 scripts/logs
 scripts/out_plan
