@@ -8,9 +8,21 @@ The pipeline is based on `3D Semantic Segmentation` of point clouds. The followi
 
 + **Running inference**: The point cloud dictionary is fed into the pre-trained model which runs inference on it. It classifies every point cloud into `14 labels`, if the model is not sure about certain point clouds then it classifies it into the `0/unlabeled` label. The `prediction` returned by the model contains two attributes: `label` and `confidence score`. Thus, every point cloud dictionary is given a new attribute `prediction` that contains the label to which the point cloud belongs to.  
 
+Sample Output:  
+Input .Ply indoor scan file:  
+![Input PLY](./static/in.png)  
+Inference from RandLANet:  
+![out semantic](./static/viz_segmentation.png)  
+
 + **Fitting a 2D plane**: Next, we disintegrate and extract the required labels from the predicted labeled point clouds. For example, to extract a floor plan, we are interested in `floor, walls, windows, columns and doors`. The points and features of these labels are stored in separate arrays respectively. To apply open3d functionalities, all these points and features parameters are compiled to convert them into open3d `pcd` class format. Finally, we fit a plane into `floor pcds` using `RANSAC` estimation. This returns a plane in format `ax+by+cz+d=0` which is later utilized for perspective projection purposes.  
 
+Extracting `floor, walls, windows, columns and doors` labelled point clouds from the inferred file:  
+![Extracted](./static/out_pcds.png)  
+
 + **Project 3D point clouds into 2D horizontal plane and extracting floor plan**: Since we are dealing with upright models, we can project the 3D pcds into the floor plane by simply scattering the points in a 2D plane by using their `x` and `y` coordinates only using `matplotlib`. This current method will not give a consistent floor plan if the model is inclined (floor is not parallel to xy-plane). The final result is then saved as a `png` file into the desired output directory.  
+
+Predicted Floor plan (note that the accuracy of the floor plan depends on the capacity of model to accurately segment point clouds):  
+![Floor Plan](./static/floor_plan.png)  
 
 + **Visualizations**: The pipeline provides the option of turning visualization parameters `on` and `off` by default these options are set to `False`. We can visualize the semantic segmentation results on point clouds from the open3d ml sub pipeline from the open3d ml visualizer. We can also visualize the results after fitting the plane and extracting the necessary labels from pcds from native open3d pcds.  
 

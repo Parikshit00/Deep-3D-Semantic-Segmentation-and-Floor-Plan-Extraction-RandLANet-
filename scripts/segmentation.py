@@ -38,9 +38,9 @@ save_planar_clouds extracts 4 labels of clouds (walls, floors, ceiling and other
 from the given point cloud and stores them individually in the output directory.
 '''
 def save_planar_clouds(out_path, pc, pipeline_r):
-    
+    os.makedirs(out_path, exist_ok = True) 
     results_r = pipeline_r.run_inference(pc)
-    print (set(results_r['predict_labels']))
+    print(set(results_r['predict_labels']))
     pred_label_r = (results_r['predict_labels'] + 1).astype(np.int32)
     pred_label_r[0] = 0
 
@@ -179,19 +179,20 @@ def main(data_path, out_path, visualize_prediction=False, vis_open3d=False, task
     pipeline.load_ckpt(model.cfg.ckpt_path)
     pcs = get_custom_data(data_path)
     if task == 'floor_plan':
+        print("Extracting floor plan...")
         pcs_with_pred = save_floor_plan([os.path.join(out_path, 'floor_plan.png')], [pcs], pipeline, vis_open3d)
+        if visualize_prediction==True:
+            print("Viz: ")
+            v = ml3d.vis.Visualizer()
+            lut = ml3d.vis.LabelLUT()
+            for val in sorted(s3dis_labels.keys()):
+                lut.add_label(s3dis_labels[val], val)
+            v.set_lut("pred",lut)
+            v.visualize(pcs_with_pred)
     elif task == 'extraction':
         save_planar_clouds(out_path, pcs, pipeline)
     else:
         print("No such task!")
-
-    if visualize_prediction==True:
-        v = ml3d.vis.Visualizer()
-        lut = ml3d.vis.LabelLUT()
-        for val in sorted(s3dis_labels.keys()):
-            lut.add_label(s3dis_labels[val], val)
-        v.set_lut("pred",lut)
-        v.visualize(pcs_with_pred)
     for file in os.listdir("."):
         if file.endswith(".png"):
             shutil.copy(file, out_path)

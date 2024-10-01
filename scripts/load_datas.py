@@ -6,9 +6,10 @@ import open3d as o3d
 
 def load_model():
   ckpt_folder = "./logs"
-  randlanet_url = "https://storage.googleapis.com/open3d-releases/model-zoo/randlanet_s3dis_202010091238.pth"
+  randlanet_url = "https://storage.googleapis.com/open3d-releases/model-zoo/randlanet_s3dis_202201071330utc.pth"
   ckpt_path = ckpt_folder + "/vis_weights_{}.pth".format('RandLANet')
   if not exists(ckpt_path):
+    os.makedirs(ckpt_folder, exist_ok = True) 
     cmd = "wget {} -O {}".format(randlanet_url, ckpt_path)
     os.system(cmd)
     print("Pretrained RandLANet weight download success")
