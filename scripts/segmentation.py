@@ -38,7 +38,6 @@ save_planar_clouds extracts 4 labels of clouds (walls, floors, ceiling and other
 from the given point cloud and stores them individually in the output directory.
 '''
 def save_planar_clouds(out_path, pc, pipeline_r):
-    os.makedirs(out_path, exist_ok = True) 
     results_r = pipeline_r.run_inference(pc)
     print(set(results_r['predict_labels']))
     pred_label_r = (results_r['predict_labels'] + 1).astype(np.int32)
@@ -157,20 +156,13 @@ def save_floor_plan(pc_names, pcs, pipeline_r, vis_open3d):
 
         if vis_open3d == True:
             o3d.visualization.draw_geometries([inlier_cloud] + [pcd_wall] + [pcd_column] + [pcd_window] + [pcd_door], zoom=0.8, front=[-0.4999, -0.1659, -0.8499], lookat=[2.1813, 2.0619, 2.0999], up=[0.1204, -0.9852, 0.1215])
-
-        
-        #inlier_points = np.asarray(inlier_cloud.points)
-
         plt.savefig(name)
-        #im = Image.open('testplot.png').convert('RGB').save('testplot.jpg','JPEG')
-        #rgb_im = im.convert('RGB')
-        #rgb_im.save('testplot.jpg','JPEG')
     return vis_points
 
 
 
 def main(data_path, out_path, visualize_prediction=False, vis_open3d=False, task='extraction'):
-
+    os.makedirs(out_path, exist_ok = True)
     cfg = _ml3d.utils.Config.load_from_file(cfg_file)
 
     cfg.model.ckpt_path = ckpt_path

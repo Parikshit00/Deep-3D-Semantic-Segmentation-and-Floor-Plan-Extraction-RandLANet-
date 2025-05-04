@@ -27,9 +27,18 @@ def get_custom_data(pc_path):
     point[:, 2] = data['z']
 
     feat = np.zeros(point.shape, dtype=np.float32)
-    feat[:, 0] = data['red']
-    feat[:, 1] = data['green']
-    feat[:, 2] = data['blue']
+    fields = data.data.dtype.names
+
+    if 'red' in fields and 'green' in fields and 'blue' in fields:
+        feat[:, 0] = data.data['red']
+        feat[:, 1] = data.data['green']
+        feat[:, 2] = data.data['blue']
+    elif 'diffuse_red' in fields and 'diffuse_green' in fields and 'diffuse_blue' in fields:
+        feat[:, 0] = data.data['diffuse_red']
+        feat[:, 1] = data.data['diffuse_green']
+        feat[:, 2] = data.data['diffuse_blue']
+    else:
+        print("No Color Information Detected! Recheck the .PLY file for 'red', 'green', 'blue' or 'diffuse_red', 'diffuse_green', 'diffuse_blue'.")
 
 
     data = {
