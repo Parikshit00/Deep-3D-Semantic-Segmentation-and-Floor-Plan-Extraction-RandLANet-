@@ -32,21 +32,20 @@ Predicted Floor plan (note that the accuracy of the floor plan depends on the ca
 + For matplotlib, the `TkAgg` engine is used instead of `qt` because qt has some version compatibility issues that conflict with the pipeline. Install the required `TkAgg` engine from the terminal to avoid any errors.  
 
 ## Usage:
-### Planar Cloud Extraction
-Use this code to store the planar/non-planar components of input point cloud. The code is available in `script/segmentation.py`
+### Planar Cloud Extraction (Only Segmentation Results)
+Use this code to store the planar/non-planar components as inferred by RandLANet from the input point cloud. The code is available in `script/planar_extraction.py`
+
+Note: There is no RANSAC post-processing, the raw results from the segmentation is extracted. The planar elements based on s3dis labels are: "ceiling", "floor", "wall", "beam", "column", "window", and "door". All the other pcd inference are saved to "others" PLY file.
+
 #### Mandatory Arguments  
 + `--data_path` : The path to input point cloud
-+ `--output_dir` : The directory to store point clouds of floor, ceiling, walls and others in separate PLY files.  
-#### Optional Arguments 
-+ `--task` : Should be kept `extraction` (default) for this task
-+ `--vis_prediction`: Option to visualize semantic segmentation result. 
-+ `--vis_open3d`: Option to visualize floor plan in 3D from open3d.
++ `--output_dir` : The directory to store point clouds of floor, ceiling, walls and others in separate PLY files.
 #### Example
 ```
-python segmentation.py --data_path data/conferenceRoom_1.ply --output_dir output/ --task floor_plan
+python planar_extraction.py --data_path data/conferenceRoom_1.ply --output_dir output/
 ```
 ### Floor Plan Extraction
-The code is available in `script/segmentation.py`
+The code is available in `script/floor_plan.py`
 #### Mandatory Arguments  
 + `--data_path` : The path to input point cloud
 + `--output_dir` : The directory to store floor plan in png format.  
@@ -56,7 +55,7 @@ The code is available in `script/segmentation.py`
 + `--vis_open3d`: Option to visualize floor plan in 3D from open3d. 
 #### Example
 ```
-python segmentation.py --data_path data/conferenceRoom_1.ply --output_dir output/ --task floor_plan
+python segmentation.py --data_path data/conferenceRoom_1.ply --output_dir output/ --task floor_plan --vis_prediction --vis_open3d
 ```
 ### Planar Mesh Reconstruction
 Use the individual point clouds (.ply) of floor, ceiling, walls and others extracted using `segmentation.py` as described above to generate a decimated mesh.

@@ -9,54 +9,6 @@ import matplotlib.pyplot as plt
 
 s3dis_labels = get_s3dis_labels()
 
-'''
-save_planar_clouds extracts 4 labels of clouds (walls, floors, ceiling and others) 
-from the given point cloud and stores them individually in the output directory.
-'''
-def save_planar_clouds(out_path, pc, pipeline_r):
-    results_r = pipeline_r.run_inference(pc)
-    print(set(results_r['predict_labels']))
-    pred_label_r = (results_r['predict_labels'] + 1).astype(np.int32)
-    pred_label_r[0] = 0
-
-    pts = pc['point']
-    feature = pc['feat']
-    label = pc['label']
-
-    labels = results_r['predict_labels']
-    labels = labels[:, None]
-    pts_ceil, feat_ceil, pts_floor, feat_floor, pts_wall, feat_wall, pts_others, feat_others = ([] for i in range(8))
-    for j, label in enumerate(results_r['predict_labels']):
-        if label == 0:
-            pts_ceil.append(pts[j])
-            feat_ceil.append(feature[j])
-        elif label == 1:
-            pts_floor.append(pts[j])
-            feat_floor.append(feature[j])    
-        elif label == 2:
-            pts_wall.append(pts[j])
-            feat_wall.append(feature[j])
-        else:
-            pts_others.append(pts[j])
-            feat_others.append(feature[j])
-
-    if len(pts_floor) != 0:
-        pcd_floor, pts_floor, feat_floor = open3d_pcd(pts_floor, feat_floor)
-        o3d.io.write_point_cloud(os.path.join(out_path,'floor.ply'), pcd_floor)
-
-    if len(pts_wall) != 0: 
-        pcd_wall, pts_wall, feat_wall = open3d_pcd(pts_wall, feat_wall)
-        o3d.io.write_point_cloud(os.path.join(out_path,'walls.ply'), pcd_wall)
-
-    if len(pts_ceil) != 0:
-        pcd_ceil, pts_ceil, feat_ceil = open3d_pcd(pts_ceil, feat_ceil)
-        o3d.io.write_point_cloud(os.path.join(out_path,'ceiling.ply'), pcd_ceil)
-
-    if len(pts_others) != 0:
-        pcd_others, pts_others, feat_others = open3d_pcd(pts_others, feat_others)
-        o3d.io.write_point_cloud(os.path.join(out_path,'others.ply'), pcd_others)
-
-
 def save_floor_plan(pc_names, pcs, pipeline_r, vis_open3d):
     vis_points = []
     for i, data in enumerate(pcs):
@@ -130,24 +82,20 @@ def save_floor_plan(pc_names, pcs, pipeline_r, vis_open3d):
             plt.scatter(pts_door[:,0], pts_door[:,1], color = 'green', s = 20)
 
         if vis_open3d == True:
+            print("Invoking open3d vizualiser....")
             open3d_visuaizer(pcs=[inlier_cloud] + [pcd_wall] + [pcd_column] + [pcd_window] + [pcd_door])
         plt.savefig(name)
     return vis_points
 
-def main(data_path, out_path, visualize_prediction=False, vis_open3d=False, task='extraction'):
+def main(data_path, out_path, visualize_prediction=False, vis_open3d=False):
     os.makedirs(out_path, exist_ok = True)
     pipeline = get_pipeline()
     pcs = get_custom_data(data_path)
-    if task == 'floor_plan':
-        print("Extracting floor plan...")
-        pcs_with_pred = save_floor_plan([os.path.join(out_path, 'floor_plan.png')], [pcs], pipeline, vis_open3d)
-        if visualize_prediction==True:
-            print("Viz: ")
-            ml3d_visualizer(pcs_with_pred=pcs_with_pred)
-    elif task == 'extraction':
-        save_planar_clouds(out_path, pcs, pipeline)
-    else:
-        print("No such task!")
+    print("Extracting floor plan...")
+    pcs_with_pred = save_floor_plan([os.path.join(out_path, 'floor_plan.png')], [pcs], pipeline, vis_open3d)
+    if visualize_prediction==True:
+        print("Vizualizing segmentation results with Open3d ML....")
+        ml3d_visualizer(pcs_with_pred=pcs_with_pred)
     for file in os.listdir("."):
         if file.endswith(".png"):
             shutil.copy(file, out_path)
@@ -161,18 +109,15 @@ if __name__ == "__main__":
     parser.add_argument("--vis_prediction", action='store_true', help="Option to visualize semantic segmentation result. DEFAULT = FALSE")
     parser.add_argument("--vis_open3d", action='store_true',help="Option to visualize floor plan in 3D from open3d. DEFAULT = FALSE")
     parser.add_argument("--output_dir", help="The path to store floor plan images")
-    parser.add_argument("--task", default='extraction', help='extraction (extract planar meshes), floor_plan')
     args = parser.parse_args()
 
     input_path = args.data_path
     output_path = args.output_dir
     visualize_prediction = args.vis_prediction
     vis_open3d =  args.vis_open3d
-    task = args.task
-
 
     if not args.data_path or not args.output_dir:
         parser.print_help(sys.stderr)
         sys.exit(1)
 
-    main(input_path, output_path, visualize_prediction, vis_open3d, task)
+    main(input_path, output_path, visualize_prediction, vis_open3d)
