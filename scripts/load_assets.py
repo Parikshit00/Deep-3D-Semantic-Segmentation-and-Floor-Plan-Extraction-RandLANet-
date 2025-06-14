@@ -3,6 +3,8 @@ from os.path import exists, join
 from plyfile import PlyData, PlyElement
 import numpy as np
 import open3d as o3d
+import open3d.ml as _ml3d
+import open3d.ml.torch as ml3d
 
 def load_model():
   ckpt_folder = "./logs"
@@ -57,3 +59,45 @@ def open3d_pcd(pts, feat):
     pcd.points = o3d.utility.Vector3dVector(pts)
     pcd.colors = o3d.utility.Vector3dVector(feat)
     return pcd, pts, feat
+
+def get_s3dis_labels():
+   s3dis_labels = {
+    0: 'unlabeled',
+    1: 'ceiling',
+    2: 'floor',
+    3: 'wall',
+    4: 'beam',
+    5: 'column',
+    6: 'window',
+    7: 'door',
+    8: 'table',
+    9: 'chair',
+    10: 'sofa',
+    11: 'bookcase',
+    12: 'board',
+    13: 'clutter'
+    }
+   return s3dis_labels
+
+def get_pipeline():
+    cfg_file = "../configs/randlanet_s3dis.yml"
+    ckpt_path = load_model()
+    cfg = _ml3d.utils.Config.load_from_file(cfg_file)
+    cfg.model.ckpt_path = ckpt_path
+    model = ml3d.models.RandLANet(**cfg.model)
+    pipeline = ml3d.pipelines.SemanticSegmentation(model, **cfg.pipeline)
+    pipeline.load_ckpt(model.cfg.ckpt_path)
+    return pipeline
+
+def ml3d_visualizer(pcs_with_pred):
+    s3dis_labels = get_s3dis_labels()
+    v = ml3d.vis.Visualizer()
+    lut = ml3d.vis.LabelLUT()
+    for val in sorted(s3dis_labels.keys()):
+        lut.add_label(s3dis_labels[val], val)
+    v.set_lut("pred",lut)
+    v.visualize(pcs_with_pred)
+
+def open3d_visuaizer(pcs):
+    o3d.visualization.draw_geometries(pcs, zoom=0.8, front=[-0.4999, -0.1659, -0.8499], lookat=[2.1813, 2.0619, 2.0999], up=[0.1204, -0.9852, 0.1215])
+

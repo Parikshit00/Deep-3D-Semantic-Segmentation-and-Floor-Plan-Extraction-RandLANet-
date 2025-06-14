@@ -1,37 +1,13 @@
-import open3d.ml.torch as ml3d
 import shutil
 import open3d as o3d
 import argparse
-import math
 import numpy as np
 import os
-import random
 import sys
-import torch
-from os.path import exists, join
-import open3d.ml as _ml3d
-from load_datas import load_model, get_custom_data, open3d_pcd
+from load_assets import *
 import matplotlib.pyplot as plt
 
-s3dis_labels = {
-    0: 'unlabeled',
-    1: 'ceiling',
-    2: 'floor',
-    3: 'wall',
-    4: 'beam',
-    5: 'column',
-    6: 'window',
-    7: 'door',
-    8: 'table',
-    9: 'chair',
-    10: 'sofa',
-    11: 'bookcase',
-    12: 'board',
-    13: 'clutter'
-}
-
-cfg_file = "../configs/randlanet_s3dis.yml"
-ckpt_path = load_model()
+s3dis_labels = get_s3dis_labels()
 
 '''
 save_planar_clouds extracts 4 labels of clouds (walls, floors, ceiling and others) 
@@ -153,34 +129,21 @@ def save_floor_plan(pc_names, pcs, pipeline_r, vis_open3d):
             pcd_door, pts_door, feat_door = open3d_pcd(pts_door, feat_door)
             plt.scatter(pts_door[:,0], pts_door[:,1], color = 'green', s = 20)
 
-
         if vis_open3d == True:
-            o3d.visualization.draw_geometries([inlier_cloud] + [pcd_wall] + [pcd_column] + [pcd_window] + [pcd_door], zoom=0.8, front=[-0.4999, -0.1659, -0.8499], lookat=[2.1813, 2.0619, 2.0999], up=[0.1204, -0.9852, 0.1215])
+            open3d_visuaizer(pcs=[inlier_cloud] + [pcd_wall] + [pcd_column] + [pcd_window] + [pcd_door])
         plt.savefig(name)
     return vis_points
 
-
-
 def main(data_path, out_path, visualize_prediction=False, vis_open3d=False, task='extraction'):
     os.makedirs(out_path, exist_ok = True)
-    cfg = _ml3d.utils.Config.load_from_file(cfg_file)
-
-    cfg.model.ckpt_path = ckpt_path
-    model = ml3d.models.RandLANet(**cfg.model)
-    pipeline = ml3d.pipelines.SemanticSegmentation(model, **cfg.pipeline)
-    pipeline.load_ckpt(model.cfg.ckpt_path)
+    pipeline = get_pipeline()
     pcs = get_custom_data(data_path)
     if task == 'floor_plan':
         print("Extracting floor plan...")
         pcs_with_pred = save_floor_plan([os.path.join(out_path, 'floor_plan.png')], [pcs], pipeline, vis_open3d)
         if visualize_prediction==True:
             print("Viz: ")
-            v = ml3d.vis.Visualizer()
-            lut = ml3d.vis.LabelLUT()
-            for val in sorted(s3dis_labels.keys()):
-                lut.add_label(s3dis_labels[val], val)
-            v.set_lut("pred",lut)
-            v.visualize(pcs_with_pred)
+            ml3d_visualizer(pcs_with_pred=pcs_with_pred)
     elif task == 'extraction':
         save_planar_clouds(out_path, pcs, pipeline)
     else:
