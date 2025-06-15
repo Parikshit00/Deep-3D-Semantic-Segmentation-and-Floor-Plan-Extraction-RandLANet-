@@ -1,5 +1,6 @@
 # Semantic Segmentation of 3D point clouds and Prediction of Floor plan  
 The pipeline is based on `3D Semantic Segmentation` of point clouds. The following steps occur in the pipeline:  
+![Pipeline](./static/pipeline_flowchart.png)  
 + **Loading pre-trained model for semantic segmentation**: Firstly, we need to prepare our sub-pipeline i.e. 3D semantic segmentation. The main library that serves this purpose (3D object detection and 3D semantic segmentation is `Open3d ML`. Currently, only two models are available for these tasks (KPConv and RandLANet). For our suitable needs, the `RandLANet` model pre-trained on the `S3DIS` dataset is used. This is because it has the highest `imOu` score for semantic segmentation on indoor point clouds. To prepare the pipeline, we load the config file `randlanet_s3dis.yml` that contains config info about loading/ training/ testing RandLANet on the s3dis dataset if needed. After this, we check if there is any existing `checkpoint` file, if no checkpoint is found the code downloads the checkpoint by establishing an HTTP request. After these steps, a 3D semantic segmentation pipeline with appropriate configs and weights for the RandLANet model trained on the s3dis dataset is loaded.  
 
 + **Preparing point cloud data for semantic segmentation pipeline**: The next step is to prepare the data properly. If the tensors of the point cloud data to be fed into the pipeline aren't configured into the appropriate shape then we get an error. For the `randlanet_s3dis` model, the point cloud data should be in `dictionary` format. The point cloud dictionary for the model should have `3 attributes` i.e. `point`, `features`, and `label`. Point refers to the `x, y, and z` coordinates of point clouds in 3D space. Features refer to the `R, G, B` values of each point cloud. The label is the criteria that must be included for every purpose (infer, train, test). In the case of prediction on custom data, point clouds are given a label of `zero` initially.
@@ -33,7 +34,7 @@ Predicted Floor plan (note that the accuracy of the floor plan depends on the ca
 
 ## Usage:
 ### Planar Cloud Extraction (Only Segmentation Results)
-Use this code to store the planar/non-planar components as inferred by RandLANet from the input point cloud. The code is available in `script/planar_extraction.py`
+Use this code to store the planar/non-planar components as inferred by RandLANet from the input point cloud. The code is available in `script/segmentation_pcd_extraction.py`
 
 Note: There is no RANSAC post-processing, the raw results from the segmentation is extracted. The planar elements based on s3dis labels are: "ceiling", "floor", "wall", "beam", "column", "window", and "door". All the other pcd inference are saved to "others" PLY file.
 
@@ -42,7 +43,7 @@ Note: There is no RANSAC post-processing, the raw results from the segmentation 
 + `--output_dir` : The directory to store point clouds of floor, ceiling, walls and others in separate PLY files.
 #### Example
 ```
-python planar_extraction.py --data_path data/conferenceRoom_1.ply --output_dir output/
+python segmentation_pcd_extraction.py --data_path data/conferenceRoom_1.ply --output_dir output/
 ```
 ### Floor Plan Extraction
 The code is available in `script/floor_plan.py`
