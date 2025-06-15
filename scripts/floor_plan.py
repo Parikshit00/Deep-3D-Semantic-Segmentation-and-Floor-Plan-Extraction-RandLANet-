@@ -240,6 +240,7 @@ def save_floor_plan(pc_names, pcs, pipeline_r, vis_open3d, refine_cylinders=Fals
                 [pcd_for_floorplan],
                 window_name="Final Breakdown processed"
             )
+        #o3d.io.write_point_cloud("pcd_floorplan.ply", pcd_for_floorplan)
     return vis_points
 
 def main(data_path, out_path, visualize_prediction=False, vis_open3d=False, refine_cylinders=False):

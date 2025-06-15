@@ -5,3 +5,5 @@ scripts/logs
 scripts/out_plan
 scripts/test.ply
 scripts/output
+scripts/results.pkl
+scripts/pcd_floorplan.ply
