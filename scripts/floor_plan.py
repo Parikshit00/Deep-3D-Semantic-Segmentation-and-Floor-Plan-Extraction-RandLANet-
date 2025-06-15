@@ -1,111 +1,267 @@
 import shutil
-import open3d as o3d
 import argparse
 import numpy as np
 import os
 import sys
 from load_assets import *
 import matplotlib.pyplot as plt
+import pickle
+import copy
 
 s3dis_labels = get_s3dis_labels()
+FURNITURE_CLASSES = [7, 8, 9, 10, 11]
+EXCLUDED_CLASSES = [0] + FURNITURE_CLASSES
+STRUCTURAL_CLASSES_FOR_FLOORPLAN = [1, 2, 3, 4, 5, 6]
 
-def save_floor_plan(pc_names, pcs, pipeline_r, vis_open3d):
+def discover_planes(source_pcd, min_points=200, distance_threshold=0.02, ransac_n=3, num_iterations=1000):
+    """Iteratively finds all significant planes in a point cloud using RANSAC."""
+    if len(source_pcd.points) < min_points: return []
+    plane_models = []
+    pcd_to_segment = copy.deepcopy(source_pcd)
+    while len(pcd_to_segment.points) > min_points:
+        plane_model, inliers = pcd_to_segment.segment_plane(
+            distance_threshold=distance_threshold, ransac_n=ransac_n, num_iterations=num_iterations)
+        if len(inliers) < min_points: break
+        plane_models.append(plane_model)
+        pcd_to_segment = pcd_to_segment.select_by_index(inliers, invert=True)
+    return plane_models
+
+def refine_with_planes(base_pcd, clutter_pcd, plane_models, distance_threshold=0.02):
+    """Refines a category with points from clutter that fit the given plane models."""
+    if not plane_models or len(clutter_pcd.points) == 0: return base_pcd, clutter_pcd
+    clutter_pts = np.asarray(clutter_pcd.points)
+    inlier_indices_set = set()
+    for model in plane_models:
+        distances = np.abs(np.dot(clutter_pts, model[:3]) + model[3])
+        inlier_indices_set.update(np.where(distances < distance_threshold)[0])
+    if not inlier_indices_set: return base_pcd, clutter_pcd
+    final_indices = list(inlier_indices_set)
+    newly_found_pcd = clutter_pcd.select_by_index(final_indices)
+    pcd_processed = base_pcd + newly_found_pcd
+    remaining_clutter = clutter_pcd.select_by_index(final_indices, invert=True)
+    return pcd_processed, remaining_clutter
+
+def find_circle_from_three_points(p1, p2, p3):
+    """Calculates the center and radius of a circle defined by three 2D points."""
+    temp = p2[0] * p2[0] + p2[1] * p2[1]
+    bc = (p1[0] * p1[0] + p1[1] * p1[1] - temp) / 2
+    cd = (temp - p3[0] * p3[0] - p3[1] * p3[1]) / 2
+    
+    det = (p1[0] - p2[0]) * (p2[1] - p3[1]) - (p2[0] - p3[0]) * (p1[1] - p2[1])
+    
+    if abs(det) < 1.0e-10: 
+        return None, None
+        
+    cx = (bc * (p2[1] - p3[1]) - cd * (p1[1] - p2[1])) / det
+    cy = ((p1[0] - p2[0]) * cd - (p2[0] - p3[0]) * bc) / det
+    
+    radius = np.sqrt((cx - p1[0])**2 + (cy - p1[1])**2)
+    return (cx, cy), radius
+
+def discover_cylinders_manual(source_pcd, min_points=200, distance_threshold=0.05, ransac_iterations=1000):
+    """
+    Iteratively finds vertical cylinders in a point cloud using a manual RANSAC
+    by fitting circles in a 2D projection.
+    """
+    if len(source_pcd.points) < min_points:
+        return []
+
+    cylinder_models = []
+    remaining_points = np.asarray(source_pcd.points)
+
+    while len(remaining_points) > min_points:
+        points_2d = remaining_points[:, [0, 2]]
+        
+        best_inlier_count = 0
+        best_model = None
+        best_inlier_indices = None
+
+        for _ in range(ransac_iterations):
+            sample_indices = np.random.choice(len(points_2d), 3, replace=False)
+            sample = points_2d[sample_indices]
+            
+            center, radius = find_circle_from_three_points(sample[0], sample[1], sample[2])
+            if center is None:
+                continue
+
+            distances_from_center = np.linalg.norm(points_2d - center, axis=1)
+            errors = np.abs(distances_from_center - radius)
+            inlier_indices = np.where(errors < distance_threshold)[0]
+            current_inlier_count = len(inlier_indices)
+            
+            if current_inlier_count > best_inlier_count:
+                best_inlier_count = current_inlier_count
+                best_model = [np.array([center[0], 0, center[1]]), np.array([0, 1, 0]), radius]
+                best_inlier_indices = inlier_indices
+        
+        if best_inlier_count > min_points:
+            cylinder_models.append(best_model)
+            mask = np.ones(len(remaining_points), dtype=bool)
+            mask[best_inlier_indices] = False
+            remaining_points = remaining_points[mask]
+        else:
+            break
+    return cylinder_models
+
+def refine_with_cylinders(base_pcd, clutter_pcd, cylinder_models, distance_threshold=0.05):
+    """Refines a category with points from clutter that fit the given cylinder models."""
+    if not cylinder_models or clutter_pcd.is_empty():
+        return base_pcd, clutter_pcd
+        
+    clutter_pts = np.asarray(clutter_pcd.points)
+    inlier_indices_set = set()
+
+    for center, axis, radius in cylinder_models:
+        point_on_axis = center
+        axis_direction = axis
+        
+        vec_p_c = clutter_pts - point_on_axis
+        dist_to_axis = np.linalg.norm(np.cross(vec_p_c, axis_direction), axis=1)
+        
+        inlier_indices_set.update(np.where(np.abs(dist_to_axis - radius) < distance_threshold)[0])
+
+    if not inlier_indices_set:
+        return base_pcd, clutter_pcd
+
+    final_indices = list(inlier_indices_set)
+    newly_found_pcd = clutter_pcd.select_by_index(final_indices)
+    pcd_processed = base_pcd + newly_found_pcd
+    remaining_clutter = clutter_pcd.select_by_index(final_indices, invert=True)
+    
+    return pcd_processed, remaining_clutter
+
+def save_floor_plan(pc_names, pcs, pipeline_r, vis_open3d, refine_cylinders=False):
     vis_points = []
     for i, data in enumerate(pcs):
         name = pc_names[i]
-        results_r = pipeline_r.run_inference(data)
+        #results_r = pipeline_r.run_inference(data)
+        #print(type(results_r))
+        #with open("results.pkl", "wb") as f:
+        #    pickle.dump(results_r, f) 
+        # FOR DEBUGGING LOADING PRESAVED PICKLE FILE
+        with open("results.pkl", "rb") as f:
+            results_r = pickle.load(f)
+        pts, features, original_labels = data['point'], data['feat'], data['label']
         pred_label_r = (results_r['predict_labels'] + 1).astype(np.int32)
         pred_label_r[0] = 0
-
-        pts = data['point']
-        feature = data['feat']
-        label = data['label']
-
         vis_d = {
             "name": name,
             "points": pts,
-            "labels": label,
-            "features": feature,
+            "labels": original_labels,
+            "features": features,
             'pred': pred_label_r,
         }
         vis_points.append(vis_d)
 
-        labels = results_r['predict_labels']
-        labels = labels[:, None]
-        pts_ceil, feat_ceil, pts_floor, feat_floor, pts_wall, feat_wall, pts_column, feat_column, pts_window, feat_window, pts_door, feat_door = ([] for i in range(12))
-        for j, label in enumerate(results_r['predict_labels']):
-            if label == 0:
-                pts_ceil.append(pts[j])
-                feat_ceil.append(feature[j])
-            if label == 1:
-                pts_floor.append(pts[j])
-                feat_floor.append(feature[j])    
-            if label == 2:
-                pts_wall.append(pts[j])
-                feat_wall.append(feature[j])
-            if label == 4:
-                pts_column.append(pts[j])
-                feat_column.append(feature[j])
-            if label == 5:
-                pts_window.append(pts[j])
-                feat_window.append(feature[j])
-            if label == 6:
-                pts_door.append(pts[j])
-                feat_door.append(feature[j])
+        pred_labels = results_r['predict_labels'].astype(np.int32)
 
-        plt.axis('off')
-        if len(pts_floor) !=0 :
-            pcd_floor, pts_floor, feat_floor = open3d_pcd(pts_floor, feat_floor)
-            plane_model, inliers = pcd_floor.segment_plane(distance_threshold=0.01,
-                                            ransac_n=3,
-                                            num_iterations=1000)
-            [a, b, c, d] = plane_model
-            print(f"Plane equation: {a:.2f}x + {b:.2f}y + {c:.2f}z + {d:.2f} = 0")
-            inlier_cloud = pcd_floor.select_by_index(inliers)
-            outlier_cloud = pcd_floor.select_by_index(inliers, invert=True)
+        print("--- Stage 1: Initial Semantic Segregation ---")
+        initial_pcds = {}
+        s3dis_labels = {
+                0: 'ceiling', 1: 'floor', 2: 'wall', 3: 'beam', 4: 'column',
+                5: 'window', 6: 'door', 7: 'table', 8: 'chair', 9: 'sofa',
+                10: 'bookcase', 11: 'board', 12: 'clutter'
+            }
+        for label_id, class_name in s3dis_labels.items():
+            mask = (pred_labels == label_id)
+            if np.any(mask):
+                pcd, _, _ = open3d_pcd(pts[mask], features[mask])
+                initial_pcds[class_name] = pcd
+        
+        print("\n--- Creating the scene based on RAW SEMANTICS ONLY ---")
+            
+        pcd_before_refinement = o3d.geometry.PointCloud()
+            
+        for class_id in STRUCTURAL_CLASSES_FOR_FLOORPLAN:
+            class_name = s3dis_labels.get(class_id)
+            if class_name in initial_pcds:
+                pcd_before_refinement += initial_pcds[class_name]
 
-        if len(pts_wall) !=0 :
-            pcd_wall, pts_wall, feat_wall = open3d_pcd(pts_wall, feat_wall)
-            #pts_wall[:,2] = -plane_model[3] / plane_model[2]
-            plt.scatter(pts_wall[:,0], pts_wall[:,1], color = 'black', s = 20)
+        print("\n--- Stage 2: Isolating Unwanted Classes and Defining Candidate Pool ---")
+        pcd_excluded = o3d.geometry.PointCloud()
+        for class_id in EXCLUDED_CLASSES:
+            class_name = s3dis_labels.get(class_id)
+            if class_name in initial_pcds:
+                pcd_excluded += initial_pcds[class_name]
+        print(f"Isolated {len(pcd_excluded.points)} ceiling and furniture points to be ignored.")
 
-        if len(pts_column) !=0 :
-            pcd_column, pts_column, feat_column = open3d_pcd(pts_column, feat_column)
-            plt.scatter(pts_column[:,0], pts_column[:,1], color = 'red', s = 20)
+        pcd_unassigned_clutter = initial_pcds.get("clutter", o3d.geometry.PointCloud())
+        print(f"Starting with {len(pcd_unassigned_clutter.points)} points in the unassigned clutter pool.")
 
-        if len(pts_window) !=0 :
-            pcd_window, pts_window, feat_window = open3d_pcd(pts_window, feat_window)
-            plt.scatter(pts_window[:,0], pts_window[:,1], color = 'blue', s = 20)
+        print("\n--- Stage 3: Iterative Geometric Refinement ---")
+        final_pcds = {s3dis_labels[k]: initial_pcds.get(s3dis_labels[k], o3d.geometry.PointCloud()) 
+                      for k in STRUCTURAL_CLASSES_FOR_FLOORPLAN}
+        PLANAR_CLASSES = [1, 2, 5, 6]  # floor, wall, window, door
+        CYLINDRICAL_CLASSES = [4, 3] # column, beam
+        PROCESSING_ORDER = PLANAR_CLASSES
+        if refine_cylinders:
+            print("Cylinder refinement is ENABLED by user.")
+            PROCESSING_ORDER += CYLINDRICAL_CLASSES
+        else:
+            print("Cylinder refinement is DISABLED. Skipping columns and beams.")
+        for class_id in PROCESSING_ORDER:
+            class_name = s3dis_labels.get(class_id)
+            if class_name in initial_pcds:
+                print(f"\n--- Refining {class_name.upper()} ---")
+                base_pcd = initial_pcds[class_name]
+                downsampled_pcd = base_pcd.voxel_down_sample(voxel_size=0.05)
+                if class_id in PLANAR_CLASSES:
+                    models = discover_planes(downsampled_pcd)
+                    print(f"Discovered {len(models)} plane model(s).")
+                    if models:
+                        final_pcds[class_name], pcd_unassigned_clutter = refine_with_planes(
+                            final_pcds[class_name], pcd_unassigned_clutter, models)
+                        print(f"Refined {class_name}. Clutter points remaining: {len(pcd_unassigned_clutter.points)}")
+                
+                elif class_id in CYLINDRICAL_CLASSES:
+                    models = discover_cylinders_manual(downsampled_pcd)
+                    print(f"Discovered {len(models)} Manual RANSAC cylinder model(s).")
+                    if models:
+                        final_pcds[class_name], pcd_unassigned_clutter = refine_with_cylinders(
+                            final_pcds[class_name], pcd_unassigned_clutter, models)
+                        print(f"Refined {class_name}. Clutter points remaining: {len(pcd_unassigned_clutter.points)}")
+        print("\n--- Stage 4: Assembling Final Point Cloud for Floor Plan ---")
+        pcd_for_floorplan = o3d.geometry.PointCloud()
+        for class_id in STRUCTURAL_CLASSES_FOR_FLOORPLAN:
+            class_name = s3dis_labels.get(class_id)
+            if class_name in final_pcds:
+                pcd_for_floorplan += final_pcds[class_name]
+        print(f"Final point cloud for floor plan has {len(pcd_for_floorplan.points)} points.")
 
-        if len(pts_door) != 0:
-            pcd_door, pts_door, feat_door = open3d_pcd(pts_door, feat_door)
-            plt.scatter(pts_door[:,0], pts_door[:,1], color = 'green', s = 20)
-
-        if vis_open3d == True:
-            print("Invoking open3d vizualiser....")
-            open3d_visuaizer(pcs=[inlier_cloud] + [pcd_wall] + [pcd_column] + [pcd_window] + [pcd_door])
-        plt.savefig(name)
+        if vis_open3d:
+            print("\n--- Stage 5: Visualizing Final Scene Breakdown ---")
+            if not pcd_before_refinement.is_empty():
+                print(f"Showing raw structural pcd with {len(pcd_before_refinement.points)} points.")
+                o3d.visualization.draw_geometries(
+                    [pcd_before_refinement],
+                    window_name="BEFORE Refinement (Raw Semantics)"
+                )
+            o3d.visualization.draw_geometries(
+                [pcd_for_floorplan],
+                window_name="Final Breakdown processed"
+            )
     return vis_points
 
-def main(data_path, out_path, visualize_prediction=False, vis_open3d=False):
+def main(data_path, out_path, visualize_prediction=False, vis_open3d=False, refine_cylinders=False):
     os.makedirs(out_path, exist_ok = True)
     pipeline = get_pipeline()
     pcs = get_custom_data(data_path)
     print("Extracting floor plan...")
-    pcs_with_pred = save_floor_plan([os.path.join(out_path, 'floor_plan.png')], [pcs], pipeline, vis_open3d)
+    pcs_with_pred = save_floor_plan([os.path.join(out_path, 'floor_plan.png')], [pcs], pipeline, vis_open3d, refine_cylinders)
     if visualize_prediction==True:
         print("Vizualizing segmentation results with Open3d ML....")
         ml3d_visualizer(pcs_with_pred=pcs_with_pred)
-    for file in os.listdir("."):
-        if file.endswith(".png"):
-            shutil.copy(file, out_path)
-            os.remove(file)
+    #for file in os.listdir("."):
+    #    if file.endswith(".png"):
+    #        shutil.copy(file, out_path)
+    #        os.remove(file)
 
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=" 3D semantic segmentation of point clouds and processing the segmentation result for floor plan")
     parser.add_argument("--data_path", help="The path to input PLY mesh file")
+    parser.add_argument("--refine_cylinders", action='store_true', help="Enable RANSAC cylinder fitting for columns and beams. DEFAULT = FALSE")
     parser.add_argument("--vis_prediction", action='store_true', help="Option to visualize semantic segmentation result. DEFAULT = FALSE")
     parser.add_argument("--vis_open3d", action='store_true',help="Option to visualize floor plan in 3D from open3d. DEFAULT = FALSE")
     parser.add_argument("--output_dir", help="The path to store floor plan images")
@@ -115,9 +271,10 @@ if __name__ == "__main__":
     output_path = args.output_dir
     visualize_prediction = args.vis_prediction
     vis_open3d =  args.vis_open3d
+    refine_cylinders_enabled = args.refine_cylinders
 
     if not args.data_path or not args.output_dir:
         parser.print_help(sys.stderr)
         sys.exit(1)
 
-    main(input_path, output_path, visualize_prediction, vis_open3d)
+    main(input_path, output_path, visualize_prediction, vis_open3d, refine_cylinders_enabled)
