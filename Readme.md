@@ -118,9 +118,9 @@ E_{\text{exclude}} = \{\text{unlabeled, ceiling}\} \cup F_{\text{furn}}
 Using these label sets, we define our initial point cloud groups:
 1.  **Initial Structural Point Clouds ( $P_l$ for $l \in S_{\text{struct}}$ ):** The baseline sets of points for each structural class, taken directly from the segmentation output.
 2.  **The Clutter Pool ($P_C$):** This is the set of points labeled as `clutter`. These points are candidates to be reassigned to a structural class.
-    ```math 
-    P_C = \{ p_i \in P \mid \hat{y}_i = \text{clutter} \} 
-    ```
+```math 
+P_C = \{ p_i \in P \mid \hat{y}_i = \text{clutter} \} 
+```
 3.  **Excluded Points:** All points belonging to classes in $E_{\text{exclude}}$ are discarded.
 
 #### 2.2.2. Iterative RANSAC Refinement
@@ -131,42 +131,46 @@ The core of the refinement process is an iterative loop over each structural cla
 
 For classes that are predominantly planar, the process is as follows:
 
-1.  **Model Discovery (`discover_planes`):** For a given class (e.g., `wall`), we run RANSAC on its initial point cloud, $P_{\text{wall}}$, to find a set of plane models $\mathcal{M}_{\text{planes}}$. Each plane model $m \in \mathcal{M}_{\text{planes}}$ is defined by the Hessian normal form:
-    ```math 
-    m = (a, b, c, d) \quad \text{such that} \quad ax + by + cz + d = 0, \quad \text{with} \quad a^2+b^2+c^2=1 
-    ```
+1.  **Model Discovery (`discover_planes`):** For a given class (e.g., `wall`), we run RANSAC on its initial point cloud, $P_{\text{wall}}$, to find a set of plane models 
+```math 
+$\mathcal{M}_{\text{planes}}$
+
+Each plane model $m \in \mathcal{M}_{\text{planes}}$ is defined by the Hessian normal form:
+m = (a, b, c, d) \quad \text{such that} \quad ax + by + cz + d = 0, \quad \text{with} \quad a^2+b^2+c^2=1 
+```
 2.  **Refinement (`refine_with_planes`):** We then test every point $p_c = (x_c, y_c, z_c)$ in the clutter pool $P_C$ against each discovered plane model $m$. A point $p_c$ is considered an **inlier** to model $m$ if its perpendicular distance to the plane is less than a threshold $\epsilon_{\text{plane}}$:
-    ```math 
-    |ax_c + by_c + cz_c + d| < \epsilon_{\text{plane}} 
-    ```
+```math 
+|ax_c + by_c + cz_c + d| < \epsilon_{\text{plane}} 
+```
 3.  **Update:** All inlier points found in $P_C$ are removed from the clutter pool and added to the corresponding structural point cloud. Let $I_l$ be the set of all inliers from $P_C$ for a class $l$. The sets are updated as:
-    ```math 
+```math 
     P'_l = P_l \cup I_l 
-    ```
-    ```math 
     P'_C = P_C \setminus I_l 
-    ```
+```
 
 **B. Cylindrical Class Refinement (`column`, `beam`) (Optional)**
 
 For classes expected to be cylindrical, a more specialized RANSAC is used:
 
 1.  **Model Discovery (`discover_cylinders_manual`):**
-    *   **Projection:** First, the 3D points of the class (e.g., $P_{\text{column}}$) are projected onto a 2D plane (the XZ-plane for vertical columns) by discarding the Y-coordinate: $p=(x,y,z) \to p'=(x,z)$.
-    *   **2D RANSAC:** A manual RANSAC is performed on these 2D points to find circle models. A circle is defined by its center $c'=(c_x, c_z)$ and radius $r$. A point $p'$ is an inlier to a circle model if its distance from the perimeter is less than a threshold $\epsilon_{\text{circle}}$:
-        ```math  
-        \left| \sqrt{(p'_x - c_x)^2 + (p'_z - c_z)^2} - r \right| < \epsilon_{\text{circle}} 
-        ```
-    *   **Model Lifting:** The discovered 2D circle models are lifted into 3D vertical cylinder models, represented by a point on the axis, the axis direction vector, and the radius. Let this set be $\mathcal{M}_{\text{cylinders}}$.
+*   **Projection:** First, the 3D points of the class (e.g., $P_{\text{column}}$) are projected onto a 2D plane (the XZ-plane for vertical columns) by discarding the Y-coordinate:
+```math
+$p=(x,y,z) \to p'=(x,z)$.
+```
+*   **2D RANSAC:** A manual RANSAC is performed on these 2D points to find circle models. A circle is defined by its center $c'=(c_x, c_z)$ and radius $r$. A point $p'$ is an inlier to a circle model if its distance from the perimeter is less than a threshold $\epsilon_{\text{circle}}$:
+```math  
+\left| \sqrt{(p'_x - c_x)^2 + (p'_z - c_z)^2} - r \right| < \epsilon_{\text{circle}} 
+```
+*   **Model Lifting:** The discovered 2D circle models are lifted into 3D vertical cylinder models, represented by a point on the axis, the axis direction vector, and the radius. Let this set be $\mathcal{M}_{\text{cylinders}}$.
 
 2.  **Refinement (`refine_with_cylinders`):** Each point $p_c$ in the clutter pool $P_C$ is tested against each cylinder model. A point $p_c$ is an inlier to a cylinder model $(C_0, \vec{a}, r)$ (where $C_0$ is a point on the axis and $\vec{a}$ is the axis direction) if its distance to the cylinder's surface is less than a threshold $\epsilon_{\text{cylinder}}$. The distance of $p_c$ to the cylinder's axis is calculated first:
-    ```math 
-    d(p_c, \text{axis}) = \frac{\| (p_c - C_0) \times \vec{a} \|}{\| \vec{a} \|} 
-    ```
-    The point is an inlier if:
-    ```math
-    | d(p_c, \text{axis}) - r | < \epsilon_{\text{cylinder}}
-    ```
+```math 
+d(p_c, \text{axis}) = \frac{\| (p_c - C_0) \times \vec{a} \|}{\| \vec{a} \|} 
+```
+The point is an inlier if:
+```math
+| d(p_c, \text{axis}) - r | < \epsilon_{\text{cylinder}}
+```
 3.  **Update:** As with planar refinement, all cylindrical inliers are moved from the clutter pool $P_C$ to the appropriate structural class point cloud.
 
 This iterative refinement process significantly improves the completeness of the structural elements, creating a much cleaner point cloud that is ready for the final floor plan generation stage.
