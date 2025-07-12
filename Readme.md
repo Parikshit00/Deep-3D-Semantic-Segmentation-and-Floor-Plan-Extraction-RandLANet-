@@ -103,17 +103,17 @@ First, we partition the segmented point cloud $P$ into three distinct groups bas
 
 Let the sets of labels for structural components, furniture, and other excluded classes be defined as:
 *   **Structural Classes ($S_{\text{struct}}$):** Labels for components essential to the floor plan.
-    ```math
-    S_{\text{struct}} = \{\text{floor, wall, beam, column, window, door}\} 
-    ```
+```math
+S_{\text{struct}} = \{\text{floor, wall, beam, column, window, door}\} 
+```
 *   **Furniture Classes ($F_{\text{furn}}$):** Labels for furniture items, which are ignored.
-    ```math 
-    F_{\text{furn}} = \{\text{table, chair, sofa, bookcase, board}\} 
-    ```
+```math 
+F_{\text{furn}} = \{\text{table, chair, sofa, bookcase, board}\} 
+```
 *   **Excluded Classes ($E_{\text{exclude}}$):** All labels to be completely removed before refinement. This includes furniture, the ceiling, and any unlabeled points.
-    ```math 
-    E_{\text{exclude}} = \{\text{unlabeled, ceiling}\} \cup F_{\text{furn}} 
-    ```
+```math 
+E_{\text{exclude}} = \{\text{unlabeled, ceiling}\} \cup F_{\text{furn}} 
+```
 
 Using these label sets, we define our initial point cloud groups:
 1.  **Initial Structural Point Clouds ( $P_l$ for $l \in S_{\text{struct}}$ ):** The baseline sets of points for each structural class, taken directly from the segmentation output.
