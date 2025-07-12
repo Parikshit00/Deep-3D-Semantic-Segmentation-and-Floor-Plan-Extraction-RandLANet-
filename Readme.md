@@ -56,11 +56,11 @@ The required dictionary must contain the following keys:
 *   `feat`: An array of shape `(N, 3)` containing the (R, G, B) color values for each point. These values are typically normalized to the range [0, 1].
 *   `label`: An array of shape `(N,)` used as a placeholder during inference. It is typically initialized with zeros.
 
-#### 2.1.3. Inference and Mathematical Formulation
+#### 2.1.3. Inference 
 
 With the pipeline and data prepared, the inference process can begin. The input data dictionary is fed into the pre-trained model, which classifies each point.
 
-**Mathematical Formulation**
+**Problem Statement Formulation**
 
 Let the input point cloud be a set of $N$ points in 3D space:
 ```math
@@ -131,11 +131,8 @@ The core of the refinement process is an iterative loop over each structural cla
 
 For classes that are predominantly planar, the process is as follows:
 
-1.  **Model Discovery (`discover_planes`):** For a given class (e.g., `wall`), we run RANSAC on its initial point cloud, $P_{\text{wall}}$, to find a set of plane models 
-```math 
-$\mathcal{M}_{\text{planes}}$
-
-Each plane model $m \in \mathcal{M}_{\text{planes}}$ is defined by the Hessian normal form:
+1.  **Model Discovery (`discover_planes`):** For a given class (e.g., `wall`), we run RANSAC on its initial point cloud, $P_{\text{wall}}$, to find a set of plane models $\mathcal{M}_{\text{planes}}$. Each plane model $m \in \mathcal{M}_{\text{planes}}$ is defined by the Hessian normal form:
+```math
 m = (a, b, c, d) \quad \text{such that} \quad ax + by + cz + d = 0, \quad \text{with} \quad a^2+b^2+c^2=1 
 ```
 2.  **Refinement (`refine_with_planes`):** We then test every point $p_c = (x_c, y_c, z_c)$ in the clutter pool $P_C$ against each discovered plane model $m$. A point $p_c$ is considered an **inlier** to model $m$ if its perpendicular distance to the plane is less than a threshold $\epsilon_{\text{plane}}$:
@@ -152,10 +149,10 @@ m = (a, b, c, d) \quad \text{such that} \quad ax + by + cz + d = 0, \quad \text{
 
 For classes expected to be cylindrical, a more specialized RANSAC is used:
 
-1.  **Model Discovery (`discover_cylinders_manual`):**
+1.  **Model Discovery:**
 *   **Projection:** First, the 3D points of the class (e.g., $P_{\text{column}}$) are projected onto a 2D plane (the XZ-plane for vertical columns) by discarding the Y-coordinate:
 ```math
-$p=(x,y,z) \to p'=(x,z)$.
+p=(x,y,z) \to p'=(x,z).
 ```
 *   **2D RANSAC:** A manual RANSAC is performed on these 2D points to find circle models. A circle is defined by its center $c'=(c_x, c_z)$ and radius $r$. A point $p'$ is an inlier to a circle model if its distance from the perimeter is less than a threshold $\epsilon_{\text{circle}}$:
 ```math  
@@ -163,7 +160,7 @@ $p=(x,y,z) \to p'=(x,z)$.
 ```
 *   **Model Lifting:** The discovered 2D circle models are lifted into 3D vertical cylinder models, represented by a point on the axis, the axis direction vector, and the radius. Let this set be $\mathcal{M}_{\text{cylinders}}$.
 
-2.  **Refinement (`refine_with_cylinders`):** Each point $p_c$ in the clutter pool $P_C$ is tested against each cylinder model. A point $p_c$ is an inlier to a cylinder model $(C_0, \vec{a}, r)$ (where $C_0$ is a point on the axis and $\vec{a}$ is the axis direction) if its distance to the cylinder's surface is less than a threshold $\epsilon_{\text{cylinder}}$. The distance of $p_c$ to the cylinder's axis is calculated first:
+2.  **Refinement:** Each point $p_c$ in the clutter pool $P_C$ is tested against each cylinder model. A point $p_c$ is an inlier to a cylinder model $(C_0, \vec{a}, r)$ (where $C_0$ is a point on the axis and $\vec{a}$ is the axis direction) if its distance to the cylinder's surface is less than a threshold $\epsilon_{\text{cylinder}}$. The distance of $p_c$ to the cylinder's axis is calculated first:
 ```math 
 d(p_c, \text{axis}) = \frac{\| (p_c - C_0) \times \vec{a} \|}{\| \vec{a} \|} 
 ```
@@ -192,49 +189,49 @@ The first step is to transform the 3D data into a 2D representation suitable for
 
 1.  **Horizontal Slicing:** To simulate a standard architectural blueprint view, we take a horizontal cross-section of the 3D point cloud. A slice is defined by a `SLICE_HEIGHT` and a `SLICE_THICKNESS`. All points $p_i = (x_i, y_i, z_i)$ from the refined structural cloud $P'_{\text{struct}}$ that fall within this vertical range are selected.
 
-    Let $h$ be `SLICE_HEIGHT` and $t$ be `SLICE_THICKNESS`. A point $p_i$ is included in the slice $P_{\text{slice}}$ if:
-    ```math
-    (h - t/2) \le z_i \le (h + t/2)
-    ```
+Let $h$ be `SLICE_HEIGHT` and $t$ be `SLICE_THICKNESS`. A point $p_i$ is included in the slice $P_{\text{slice}}$ if:
+```math
+(h - t/2) \le z_i \le (h + t/2)
+```
 
 2.  **Projection:** The 3D points in $P_{\text{slice}}$ are then projected onto the XY-plane by simply discarding their Z-coordinate, creating a 2D point set, $P_{2D}$.
-    ```math 
-    (x_i, y_i, z_i) \to (x'_i, y'_i) = (x_i, y_i)
-    ``` 
+```math 
+(x_i, y_i, z_i) \to (x'_i, y'_i) = (x_i, y_i)
+``` 
 
 3.  **Rasterization (`create_occupancy_grid`):** The 2D points are converted into a binary image called an occupancy grid.
-    *   **Grid Definition:** The process first determines the spatial extent of the 2D points (a bounding box) and creates a grid of pixels, where each pixel represents a physical area defined by `GRID_RESOLUTION`.
-    *   **Point-to-Pixel Mapping:** Each 2D point $(x'_i, y'_i)$ is mapped to a discrete pixel coordinate $(u_i, v_i)$ in the grid. This transformation involves a translation and scaling:
-        ```math 
-        u_i = \left\lfloor \frac{x'_i - x_{\min}}{\text{resolution}} \right\rfloor, \quad v_i = \left\lfloor \frac{y'_i - y_{\min}}{\text{resolution}} \right\rfloor
-        ```
-    *   **Occupancy:** The pixel at each coordinate $(u_i, v_i)$ is marked as occupied (set to a value of 255).
-    *   **Cleaning:** A **morphological closing** operation (`cv2.morphologyEx` with `cv2.MORPH_CLOSE`) is applied to the grid. This computer vision technique first dilates the image (thickening features) and then erodes it (thinning them back). The net effect is the closure of small gaps and holes in the detected walls, creating more continuous features for the next step.
+*   **Grid Definition:** The process first determines the spatial extent of the 2D points (a bounding box) and creates a grid of pixels, where each pixel represents a physical area defined by `GRID_RESOLUTION`.
+*   **Point-to-Pixel Mapping:** Each 2D point $(x'_i, y'_i)$ is mapped to a discrete pixel coordinate $(u_i, v_i)$ in the grid. This transformation involves a translation and scaling:
+```math 
+u_i = \left\lfloor \frac{x'_i - x_{\min}}{\text{resolution}} \right\rfloor, \quad v_i = \left\lfloor \frac{y'_i - y_{\min}}{\text{resolution}} \right\rfloor
+```
+*   **Occupancy:** The pixel at each coordinate $(u_i, v_i)$ is marked as occupied (set to a value of 255).
+*   **Cleaning:** A **morphological closing** operation (`cv2.morphologyEx` with `cv2.MORPH_CLOSE`) is applied to the grid. This computer vision technique first dilates the image (thickening features) and then erodes it (thinning them back). The net effect is the closure of small gaps and holes in the detected walls, creating more continuous features for the next step.
 
 #### 2.3.2. Vectorization via Hough Transform and Refinement
 
 The occupancy grid is a raster image. To create a true floor plan, we must convert it back into a vector format—a set of lines.
 
 1.  **Line Segment Detection (`cv2.HoughLinesP`):** The **Probabilistic Hough Transform** is applied to the cleaned occupancy grid. Unlike the standard Hough Transform, this algorithm directly detects and returns the endpoints of line segments, which is more efficient for this task. It is governed by key parameters:
-    *   `HOUGH_THRESHOLD`: The minimum number of collinear points required to form a line.
-    *   `HOUGH_MIN_LINE_LENGTH`: The minimum length of a line in pixels to be considered valid.
-    *   `HOUGH_MAX_LINE_GAP`: The maximum allowed gap between two points on the same line.
+*   `HOUGH_THRESHOLD`: The minimum number of collinear points required to form a line.
+*   `HOUGH_MIN_LINE_LENGTH`: The minimum length of a line in pixels to be considered valid.
+*   `HOUGH_MAX_LINE_GAP`: The maximum allowed gap between two points on the same line.
 
 2.  **Line Merging (`merge_lines`):** The raw output from the Hough Transform is often fragmented into many small, collinear segments. This step merges them into longer, more coherent lines. Two lines are considered candidates for merging if:
-    *   **Angle Similarity:** The difference in their angles is below `MERGE_ANGLE_TOLERANCE`.
-    *   **Proximity:** The perpendicular distance from an endpoint of one line to the infinite line defined by the other is below `MERGE_DISTANCE_TOLERANCE`. The distance from a point $p_1$ to a line passing through points $p_a$ and $p_b$ is given by:
-        ```math 
-        d(p_1, \text{line}(p_a, p_b)) = \frac{\| (p_1 - p_a) \times (p_b - p_a) \|}{\| p_b - p_a \|}
-        ``` 
-    Once a cluster of mergeable lines is identified, `cv2.fitLine` is used to compute a single best-fit line through all their constituent points, creating a new, unified line segment.
+*   **Angle Similarity:** The difference in their angles is below `MERGE_ANGLE_TOLERANCE`.
+*   **Proximity:** The perpendicular distance from an endpoint of one line to the infinite line defined by the other is below `MERGE_DISTANCE_TOLERANCE`. The distance from a point $p_1$ to a line passing through points $p_a$ and $p_b$ is given by:
+```math 
+d(p_1, \text{line}(p_a, p_b)) = \frac{\| (p_1 - p_a) \times (p_b - p_a) \|}{\| p_b - p_a \|}
+``` 
+Once a cluster of mergeable lines is identified, `cv2.fitLine` is used to compute a single best-fit line through all their constituent points, creating a new, unified line segment.
 
 3.  **Corner Snapping (`connect_corners`):** To create architecturally clean corners and intersections, this final step adjusts the endpoints of the merged lines.
-    *   The algorithm identifies clusters of line endpoints that are closer to each other than the `SNAP_TOLERANCE`. The distance between two endpoints $e_i = (x_i, y_i)$ and $e_j = (x_j, y_j)$ is the standard Euclidean distance:
-        ```math 
-        d(e_i, e_j) = \sqrt{(x_i - x_j)^2 + (y_i - y_j)^2} < \text{SNAP\_TOLERANCE}
-        ``` 
-    *   For each identified cluster, a new corner point is calculated by finding the centroid (average position) of all endpoints in that cluster.
-    *   The endpoints of the original lines are then updated to "snap" to this new, single corner point, ensuring that walls connect perfectly.
+*   The algorithm identifies clusters of line endpoints that are closer to each other than the `SNAP_TOLERANCE`. The distance between two endpoints $e_i = (x_i, y_i)$ and $e_j = (x_j, y_j)$ is the standard Euclidean distance:
+```math 
+d(e_i, e_j) = \sqrt{(x_i - x_j)^2 + (y_i - y_j)^2} < \text{SNAP\_TOLERANCE}
+``` 
+*   For each identified cluster, a new corner point is calculated by finding the centroid (average position) of all endpoints in that cluster.
+*   The endpoints of the original lines are then updated to "snap" to this new, single corner point, ensuring that walls connect perfectly.
 
 Final Result: 
 ![Final Floor Plan](static/floor_plan.png)
